@@ -1,7 +1,6 @@
-streamlit==1.32.0
-pandas==2.2.0
-plotly==5.18.0
-pypdf2==3.0.1
-requests==2.31.0
-rapidfuzz==3.6.1
-openai==1.61.0
+streamlit
+pandas
+plotly
+pypdf2
+requests
+rapidfuzz
