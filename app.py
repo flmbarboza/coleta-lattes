@@ -1,32 +1,32 @@
-import io
-import re
-import time
-import requests
-import pandas as pd
 import streamlit as st
-import plotly.express as px
+import pandas as pd
+import re
+import io
 from PyPDF2 import PdfReader
-from rapidfuzz import fuzz
+import plotly.express as px
+import requests
+import time
 
-# ---------------------------
-# Configuração Streamlit
-# ---------------------------
-st.set_page_config(page_title="Lattes → Artigos → Gráficos", layout="wide")
-st.title("📚 Lattes (PDF) → Artigos em Periódicos → Confirmação → Gráficos")
+# ---------------------------------------------------------
+# CONFIG STREAMLIT
+# ---------------------------------------------------------
+st.set_page_config(page_title="Lattes Turbo", layout="wide")
+st.title("📚 Lattes → Artigos (Turbo)")
 
-# ---------------------------
-# PDF → texto
-# ---------------------------
-def pdf_to_text(file_bytes: bytes) -> str:
+# ---------------------------------------------------------
+# PDF → TEXTO
+# ---------------------------------------------------------
+@st.cache_data(show_spinner=False)
+def pdf_to_text_cached(file_bytes):
     reader = PdfReader(io.BytesIO(file_bytes))
-    txt = []
+    text = []
     for p in reader.pages:
-        txt.append(p.extract_text() or "")
-    return "\n".join(txt)
+        text.append(p.extract_text() or "")
+    return "\n".join(text)
 
-# ---------------------------
-# Recorta a seção de Artigos completos em periódicos
-# ---------------------------
+# ---------------------------------------------------------
+# RECORTA SEÇÃO DE ARTIGOS
+# ---------------------------------------------------------
 def slice_journal_section(text: str) -> str:
     clean = re.sub(r"[ \t]+", " ", text)
     clean = re.sub(r"\n{2,}", "\n", clean)
@@ -51,7 +51,6 @@ def slice_journal_section(text: str) -> str:
         if m:
             start = m.start()
             break
-
     if start is None:
         return ""
 
@@ -62,159 +61,84 @@ def slice_journal_section(text: str) -> str:
         if m:
             end = m.start()
             break
-
     if end is not None:
         sub = sub[:end]
 
-    # remove o cabeçalho
-    sub = re.sub(
-        r"^.*?periódicos\s*\n", "", sub, flags=re.IGNORECASE | re.DOTALL
-    )
+    sub = re.sub(r"^.*?periódicos\s*\n", "", sub, flags=re.IGNORECASE | re.DOTALL)
     return sub.strip()
 
-# ---------------------------
-# Heurística para extrair artigos
-# ---------------------------
-def extract_articles_heuristic(section: str) -> pd.DataFrame:
+# ---------------------------------------------------------
+# HEURÍSTICA PARA EXTRAIR ARTIGOS
+# ---------------------------------------------------------
+def extract_articles(section: str) -> pd.DataFrame:
     if not section:
-        return pd.DataFrame(columns=["ano", "titulo", "doi"])
+        return pd.DataFrame(columns=["ano","titulo","doi"])
 
-    # Divide por itens numerados (1., 2., 3., etc.)
     items = re.split(r"\n(?=\d+\.)", section)
     doi_regex = r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+\b"
 
     rows = []
-
     for it in items:
         it = it.strip()
         if len(it) < 30:
             continue
 
-        # captura DOI
+        # DOI
         mdoi = re.search(doi_regex, it, flags=re.IGNORECASE)
         doi = mdoi.group(0).rstrip(" .;,") if mdoi else ""
 
-        # captura ano (último ano do item)
-        years = re.findall(r"\b(19\d{2}|20\d{2})\b", it)
-        ano = int(years[-1]) if years else None
+        # Ano
+        anos = re.findall(r"\b(19\d{2}|20\d{2})\b", it)
+        ano = int(anos[-1]) if anos else None
 
-        # tenta pegar título
+        # Título
         parts = [p.strip() for p in it.split(".") if p.strip()]
-        if len(parts) >= 2:
-            titulo = parts[1]
-        else:
-            titulo = re.sub(r"^\d+\.\s*", "", it.split("\n")[0]).strip()
+        titulo = parts[1] if len(parts) >= 2 else it
 
         rows.append({"ano": ano, "titulo": titulo, "doi": doi})
 
     df = pd.DataFrame(rows)
     if not df.empty:
-        df["titulo"] = (
-            df["titulo"]
-            .astype(str)
-            .str.replace(r"\s+", " ", regex=True)
-            .str.strip()
-        )
+        df["titulo"] = df["titulo"].astype(str).str.replace(r"\s+", " ", regex=True).str.strip()
         df["doi"] = df["doi"].fillna("").str.strip()
 
     return df
 
-# ---------------------------
-# OpenAlex: obter cited_by_count por DOI
-# ---------------------------
-OPENALEX_BASE = "https://api.openalex.org"
-
-def openalex_work_by_doi(doi: str, api_key: str):
-    """
-    Recupera o 'Work' do OpenAlex via DOI:
-    /works/https://doi.org/<DOI>
-    """
-    url = f"{OPENALEX_BASE}/works/https://doi.org/{doi}"
+# ---------------------------------------------------------
+# OPENALEX → citações
+# ---------------------------------------------------------
+def get_citations(doi: str, api_key: str):
+    url = f"https://api.openalex.org/works/https://doi.org/{doi}"
     r = requests.get(url, params={"api_key": api_key}, timeout=20)
     if r.status_code == 200:
-        return r.json()
+        return r.json().get("cited_by_count", None)
     return None
 
-def add_citations(df: pd.DataFrame, api_key: str, progress_cb=None) -> pd.DataFrame:
-    if df.empty:
-        df["citacoes"] = []
-        return df
-
-    citations = []
-    for i, row in df.iterrows():
-        doi = (row.get("doi") or "").strip()
-        cited = None
-
-        if doi:
-            try:
-                wk = openalex_work_by_doi(doi, api_key)
-                if wk:
-                    cited = wk.get("cited_by_count", None)
-            except Exception:
-                cited = None
-
-        citations.append(cited)
-        if progress_cb:
-            progress_cb(i + 1, len(df))
-        time.sleep(0.10)
-
-    out = df.copy()
-    out["citacoes"] = citations
-    return out
-
-# ---------------------------
+# ---------------------------------------------------------
 # UI
-# ---------------------------
-
-if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {
-            "role": "assistant",
-            "content": "Olá! Envie o PDF do Lattes e eu extraio os artigos publicados em periódicos para confirmar e gerar gráficos."
-        }
-    ]
-
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-uploaded = st.file_uploader("📄 PDF do Lattes", type=["pdf"])
+# ---------------------------------------------------------
+uploaded = st.file_uploader("📄 Envie o PDF do Lattes", type=["pdf"])
 
 if uploaded:
-    st.session_state.messages.append(
-        {"role": "user", "content": f"Enviei o arquivo: **{uploaded.name}**"}
-    )
-    with st.chat_message("user"):
-        st.markdown(f"Enviei o arquivo: **{uploaded.name}**")
-
     file_bytes = uploaded.read()
+    text = pdf_to_text_cached(file_bytes)
 
-    with st.chat_message("assistant"):
-        st.markdown("Lendo PDF e extraindo a seção de *Artigos completos publicados em periódicos*…")
-
-    text = pdf_to_text(file_bytes)
     section = slice_journal_section(text)
-
     if not section:
-        st.error("Não encontrei a seção de artigos. Se for PDF escaneado, será necessário OCR.")
+        st.error("❌ Não encontrei a seção de artigos. Pode ser PDF escaneado.")
         st.stop()
 
-    df = extract_articles_heuristic(section)
-
+    df = extract_articles(section)
     if df.empty:
-        st.error("Não consegui extrair artigos. O PDF pode estar com formatação incomum.")
+        st.error("❌ Não consegui extrair artigos. PDF pode estar com formatação incomum.")
         st.stop()
 
-    st.success(f"Encontrei **{len(df)}** artigos. Confirme/edite abaixo:")
+    st.success(f"Encontrados **{len(df)}** artigos. Confirme/edite abaixo:")
 
-    df_edit = st.data_editor(
-        df[["ano", "titulo", "doi"]],
-        num_rows="dynamic",
-        use_container_width=True
-    )
+    df_edit = st.data_editor(df, num_rows="dynamic", use_container_width=True)
 
-    st.subheader("Citações via OpenAlex + gráficos")
-    fetch_cit = st.checkbox("Buscar citações no OpenAlex (via DOI)", value=True)
+    st.subheader("🔎 Citações (OpenAlex opcional)")
+    fetch = st.checkbox("Buscar citações (requer DOI)", value=False)
 
     if st.button("Gerar gráficos"):
         df_final = df_edit.copy()
@@ -222,70 +146,43 @@ if uploaded:
         df_final["titulo"] = df_final["titulo"].astype(str).str.strip()
         df_final["doi"] = df_final["doi"].astype(str).str.strip()
 
-        df_final = df_final[df_final["titulo"].str.len() > 3].reset_index(drop=True)
-
-        if df_final.empty:
-            st.error("Nada válido após a edição.")
-            st.stop()
-
-        # citações
-        if fetch_cit:
+        if fetch:
             api_key = st.secrets.get("OPENALEX_API_KEY", "")
             if not api_key:
-                st.error("Configure a OPENALEX_API_KEY em Secrets no Streamlit Cloud.")
+                st.error("Configure OPENALEX_API_KEY em Secrets.")
                 st.stop()
 
+            cites = []
             prog = st.progress(0)
-            status = st.empty()
-
-            def progress_cb(done, total):
-                prog.progress(int((done / total) * 100))
-                status.text(f"{done}/{total} artigos consultados…")
-
-            df_final = add_citations(df_final, api_key, progress_cb)
-            status.text("Consulta concluída.")
+            for i, row in df_final.iterrows():
+                doi = row["doi"]
+                c = get_citations(doi, api_key) if doi else None
+                cites.append(c)
+                prog.progress((i+1)/len(df_final))
+                time.sleep(0.05)
+            df_final["citacoes"] = cites
         else:
-            df_final["citacoes"] = pd.NA
+            df_final["citacoes"] = None
 
-        # gráfico 1
-        pub = (
-            df_final.dropna(subset=["ano"])
-            .groupby("ano", as_index=False)
-            .size()
-            .rename(columns={"size": "publicacoes"})
-        )
+        # Gráfico 1
+        pub = df_final.dropna(subset=["ano"]).groupby("ano").size().reset_index(name="publicacoes")
+        fig1 = px.bar(pub, x="ano", y="publicacoes")
+        st.plotly_chart(fig1, use_container_width=True)
 
-        # gráfico 2
-        cit = (
-            df_final.dropna(subset=["ano", "citacoes"])
-            .assign(citacoes=lambda x: pd.to_numeric(x["citacoes"], errors="coerce"))
-            .dropna(subset=["citacoes"])
-            .groupby("ano", as_index=False)["citacoes"]
-            .mean()
-            .rename(columns={"citacoes": "media_citacoes"})
-        )
+        # Gráfico 2
+        cit = df_final.dropna(subset=["ano","citacoes"])
+        if cit.empty:
+            st.warning("Sem citações suficientes para gerar o gráfico.")
+        else:
+            g2 = cit.groupby("ano")["citacoes"].mean().reset_index(name="media_citacoes")
+            fig2 = px.line(g2, x="ano", y="media_citacoes", markers=True)
+            st.plotly_chart(fig2, use_container_width=True)
 
-        c1, c2 = st.columns(2)
-
-        with c1:
-            st.markdown("### 📈 Publicações por ano")
-            fig1 = px.bar(pub, x="ano", y="publicacoes", text="publicacoes")
-            st.plotly_chart(fig1, use_container_width=True)
-
-        with c2:
-            st.markdown("### 📊 Média de citações por ano")
-            if cit.empty:
-                st.warning("Não há citações suficientes (provavelmente faltam DOIs).")
-            else:
-                fig2 = px.line(cit, x="ano", y="media_citacoes", markers=True)
-                st.plotly_chart(fig2, use_container_width=True)
-
-        st.markdown("### 🔎 Dados finais")
+        st.subheader("📄 Dados finais")
         st.dataframe(df_final, use_container_width=True)
 
         st.download_button(
             "Baixar CSV",
             df_final.to_csv(index=False).encode("utf-8"),
-            file_name="artigos_lattes.csv",
-            mime="text/csv",
+            "artigos_lattes.csv"
         )
