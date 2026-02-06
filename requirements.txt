@@ -4,3 +4,4 @@ plotly
 pypdf2
 requests
 rapidfuzz
+openai
