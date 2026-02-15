@@ -5,19 +5,24 @@ def baixar_lattes(id_lattes):
     url = f"http://lattes.cnpq.br/{id_lattes}.xml"
 
     headers = {
-        "User-Agent": "Mozilla/5.0"
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/xml,text/xml"
     }
 
-    r = requests.get(url, headers=headers, timeout=30)
+    try:
+        r = requests.get(url, headers=headers, timeout=30)
 
-    if r.status_code == 200:
-        return r.content
-    else:
-        return None
+        # ✅ verificar sucesso
+        if r.status_code != 200:
+            return None, f"HTTP {r.status_code}"
 
-import streamlit as st
+        content = r.content
 
-@st.cache_data(show_spinner=False)
-def get_xml(id_lattes):
-    from pipeline.downloader import baixar_lattes
-    return baixar_lattes(id_lattes)
+        # ✅ verificar se parece XML
+        if not content.strip().startswith(b"<?xml"):
+            return None, "Resposta não é XML (possível bloqueio)"
+
+        return content, None
+
+    except Exception as e:
+        return None, str(e)
