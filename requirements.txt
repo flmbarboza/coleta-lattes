@@ -1,7 +1,5 @@
 streamlit
 pandas
-plotly
-pypdf2
 requests
-rapidfuzz
-openai
+lxml
+plotly
