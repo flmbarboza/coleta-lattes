@@ -14,3 +14,10 @@ def baixar_lattes(id_lattes):
         return r.content
     else:
         return None
+
+import streamlit as st
+
+@st.cache_data(show_spinner=False)
+def get_xml(id_lattes):
+    from pipeline.downloader import baixar_lattes
+    return baixar_lattes(id_lattes)
