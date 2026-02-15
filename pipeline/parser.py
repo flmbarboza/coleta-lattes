@@ -3,7 +3,11 @@ import pandas as pd
 
 def parse_xml(xml_bytes):
 
-    root = ET.fromstring(xml_bytes)
+    try:
+        root = ET.fromstring(xml_bytes)
+
+    except ET.ParseError:
+        return pd.DataFrame()
 
     docente = root.attrib.get("NOME-COMPLETO")
 
@@ -13,6 +17,9 @@ def parse_xml(xml_bytes):
 
     for art in artigos:
         info = art.find("DADOS-BASICOS-DO-ARTIGO")
+
+        if info is None:
+            continue
 
         dados.append({
             "docente": docente,
