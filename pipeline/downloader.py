@@ -1,6 +1,8 @@
 import requests
+import time
 
-def baixar_lattes(id_lattes):
+
+def baixar_lattes(id_lattes, max_tentativas=3):
 
     url = f"http://lattes.cnpq.br/{id_lattes}.xml"
 
@@ -9,20 +11,29 @@ def baixar_lattes(id_lattes):
         "Accept": "application/xml,text/xml"
     }
 
-    try:
-        r = requests.get(url, headers=headers, timeout=30)
+    for tentativa in range(max_tentativas):
 
-        # ✅ verificar sucesso
-        if r.status_code != 200:
-            return None, f"HTTP {r.status_code}"
+        try:
+            r = requests.get(url, headers=headers, timeout=30)
 
-        content = r.content
+            # ✅ status HTTP
+            if r.status_code != 200:
+                erro = f"HTTP {r.status_code}"
 
-        # ✅ verificar se parece XML
-        if not content.strip().startswith(b"<?xml"):
-            return None, "Resposta não é XML (possível bloqueio)"
+            else:
+                content = r.content
 
-        return content, None
+                # ✅ verificar se é XML real
+                if content.strip().startswith(b"<?xml"):
+                    return content, None
+                else:
+                    erro = "Resposta não é XML (bloqueio provável)"
 
-    except Exception as e:
-        return None, str(e)
+        except Exception as e:
+            erro = str(e)
+
+        # 🔁 retry
+        if tentativa < max_tentativas - 1:
+            time.sleep(5)  # espera antes de tentar novamente
+
+    # ❌ falhou após ret
