@@ -1,4 +1,13 @@
-.streamlit/secrets.toml
-*.env
+# Python
 __pycache__/
 *.pyc
+
+# Dados locais
+data/xml/*
+data/processed/*
+
+# MacOS
+.DS_Store
+
+# Streamlit cache
+.streamlit/secrets.toml
