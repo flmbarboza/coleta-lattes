@@ -1,27 +1,16 @@
 import requests
-import time
-from pathlib import Path
 
-def baixar_lattes(df):
+def baixar_lattes(id_lattes):
 
-    Path("data/xml").mkdir(parents=True, exist_ok=True)
+    url = f"http://lattes.cnpq.br/{id_lattes}.xml"
 
-    resultados = []
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
 
-    for _, row in df.iterrows():
+    r = requests.get(url, headers=headers, timeout=30)
 
-        id_lattes = row["id_lattes"]
-        url = f"http://lattes.cnpq.br/{id_lattes}.xml"
-
-        r = requests.get(url)
-
-        if r.status_code == 200:
-            with open(f"data/xml/{id_lattes}.xml", "wb") as f:
-                f.write(r.content)
-            resultados.append((id_lattes, "OK"))
-        else:
-            resultados.append((id_lattes, "Erro"))
-
-        time.sleep(5)
-
-    return resultados
+    if r.status_code == 200:
+        return r.content
+    else:
+        return None
