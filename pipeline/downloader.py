@@ -11,29 +11,29 @@ def baixar_lattes(id_lattes, max_tentativas=3):
         "Accept": "application/xml,text/xml"
     }
 
+    erro = "Falha desconhecida"
+
     for tentativa in range(max_tentativas):
 
         try:
             r = requests.get(url, headers=headers, timeout=30)
 
-            # ✅ status HTTP
             if r.status_code != 200:
                 erro = f"HTTP {r.status_code}"
 
             else:
                 content = r.content
 
-                # ✅ verificar se é XML real
+                # verifica se é XML real
                 if content.strip().startswith(b"<?xml"):
                     return content, None
                 else:
-                    erro = "Resposta não é XML (bloqueio provável)"
+                    erro = "Captcha ou bloqueio detectado"
 
         except Exception as e:
             erro = str(e)
 
-        # 🔁 retry
-        if tentativa < max_tentativas - 1:
-            time.sleep(5)  # espera antes de tentar novamente
+        time.sleep(5)
 
-    # ❌ falhou após ret
+    # ✅ SEMPRE retorna tupla
+    return None, erro
